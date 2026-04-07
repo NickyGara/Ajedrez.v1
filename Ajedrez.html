@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ajedrez Lógico - IA Heurística</title>
+  <style>
+    :root { --board-size: 440px; }
+    body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: #eee; padding: 20px; }
+    .chess-container { width: var(--board-size); margin: 20px auto; border: 5px solid #333; }
+    #board { display: grid; grid-template-columns: repeat(8, 1fr); background: #444; }
+    .box { aspect-ratio: 1/1; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+    .piece-sym { font-size: 40px; line-height: 1; z-index: 2; }
+    .light { background: #dfdfdf; }
+    .dark { background: #888; }
+    .piece-w { color: #fff; text-shadow: 0 0 3px #000; }
+    .piece-b { color: #000; }
+    .selected { background: #f1c40f !important; }
+    .valid-move::after { content: ''; position: absolute; width: 25%; height: 25%; background: rgba(46, 204, 113, 0.6); border-radius: 50%; }
+    .in-check { background: #c0392b !important; }
+    .mode-btn { padding: 12px; margin: 10px; cursor: pointer; border-radius: 5px; border: none; background: #2980b9; color: white; font-weight: bold; }
+    .active { background: #27ae60; }
+    #status { font-size: 1.2rem; margin: 15px; color: #f1c40f; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <h1>♟️ AJEDREZ CON IA EVALUATIVA</h1>
+  <div class="controls">
+    <button class="mode-btn" id="btnPvP">PvP</button>
+    <button class="mode-btn" id="btnEasy">vs IA (Lógica)</button>
+  </div>
+  <div id="status">Selecciona un modo</div>
+  <div class="chess-container"><div id="board"></div></div>
+
+<script>
+    const size = 8;
+    let board = [];
+    let whiteTurn = true;
+    let gameMode = null;
+    let selectedCell = null;
+    let validMoves = [];
+    let gameOver = false;
+
+    // Valores para la IA
+    const pieceValues = { p: 10, n: 30, b: 30, r: 50, q: 90, k: 900 };
+
+    function initGame() {
+        board = Array.from({ length: size }, () => Array(size).fill(""));
+        board[0] = ["br","bn","bb","bq","bk","bb","bn","br"];
+        board[1] = Array(8).fill("bp");
+        board[6] = Array(8).fill("wp");
+        board[7] = ["wr","wn","wb","wq","wk","wb","wn","wr"];
+        whiteTurn = true;
+        gameOver = false;
+        selectedCell = null;
+        validMoves = [];
+        updateStatus();
+        drawBoard();
+    }
+
+    function drawBoard() {
+        const boardEl = document.getElementById("board");
+        boardEl.innerHTML = "";
+        for (let r = 0; r < size; r++) {
+            for (let c = 0; c < size; c++) {
+                const p = board[r][c];
+                const cell = document.createElement("div");
+                cell.className = `box ${(r + c) % 2 === 0 ? 'light' : 'dark'}`;
+                if (p) {
+                    cell.innerHTML = `<span class="piece-sym">${{p:'♟',r:'♜',n:'♞',b:'♝',q:'♛',k:'♚'}[p[1]]}</span>`;
+                    cell.classList.add(`piece-${p[0]}`);
+                    if (p[1] === 'k' && isCheck(p[0], board)) cell.classList.add("in-check");
+                }
+                if (selectedCell?.r === r && selectedCell?.c === c) cell.classList.add("selected");
+                if (validMoves.some(m => m.r === r && m.c === c)) cell.classList.add("valid-move");
+                cell.onclick = () => handleCellClick(r, c);
+                boardEl.appendChild(cell);
+            }
+        }
+    }
+
+    function handleCellClick(r, c) {
+        if (gameOver || !gameMode) return;
+        const p = board[r][c];
+        if (selectedCell && validMoves.some(m => m.r === r && m.c === c)) {
+            executeMove(board, selectedCell.r, selectedCell.c, r, c);
+            if (!gameOver && !whiteTurn && gameMode === "easy") setTimeout(bestMoveIA, 500);
+            return;
+        }
+        if (p && p[0] === (whiteTurn ? 'w' : 'b')) {
+            selectedCell = { r, c };
+            validMoves = getSafeMoves(r, c, board);
+            drawBoard();
+        }
+    }
+
+    // Movimientos que no dejan al rey en jaque
+    function getSafeMoves(r, c, currentBoard) {
+        let moves = [];
+        const piece = currentBoard[r][c];
+        for (let tr = 0; tr < 8; tr++) {
+            for (let tc = 0; tc < 8; tc++) {
+                if (isValidMove(r, c, tr, tc, currentBoard)) {
+                    // Simular movimiento
+                    let tempBoard = currentBoard.map(row => [...row]);
+                    tempBoard[tr][tc] = tempBoard[r][c];
+                    tempBoard[r][c] = "";
+                    // Si el rey no queda en jaque, es seguro
+                    if (!isCheck(piece[0], tempBoard)) moves.push({ r: tr, c: tc });
+                }
+            }
+        }
+        return moves;
+    }
+
+    function isValidMove(fR, fC, tR, tC, b) {
+        const p = b[fR][fC];
+        if (b[tR][tC] && b[tR][tC][0] === p[0]) return false;
+        const rd = tR - fR, cd = Math.abs(tC - fC), ra = Math.abs(rd);
+        const dir = p[0] === 'w' ? -1 : 1;
+
+        switch(p[1]) {
+            case 'p':
+                if (cd === 0 && rd === dir && !b[tR][tC]) return true;
+                if (cd === 0 && rd === 2*dir && fR === (p[0]==='w'?6:1) && !b[fR+dir][fC] && !b[tR][tC]) return true;
+                if (cd === 1 && rd === dir && b[tR][tC]) return true;
+                return false;
+            case 'r': return (fR === tR || fC === tC) && isPathClear(fR, fC, tR, tC, b);
+            case 'n': return (ra === 2 && cd === 1) || (ra === 1 && cd === 2);
+            case 'b': return ra === cd && isPathClear(fR, fC, tR, tC, b);
+            case 'q': return (fR === tR || fC === tC || ra === cd) && isPathClear(fR, fC, tR, tC, b);
+            case 'k': return ra <= 1 && cd <= 1;
+        }
+        return false;
+    }
+
+    function isPathClear(fR, fC, tR, tC, b) {
+        const rs = Math.sign(tR - fR), cs = Math.sign(tC - fC);
+        let r = fR + rs, c = fC + cs;
+        while (r !== tR || c !== tC) { if (b[r][c]) return false; r += rs; c += cs; }
+        return true;
+    }
+
+    function isCheck(color, b) {
+        let kR, kC;
+        for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(b[r][c] === color+'k') { kR=r; kC=c; }
+        const enemy = color === 'w' ? 'b' : 'w';
+        for(let r=0; r<8; r++) for(let c=0; c<8; c++) 
+            if(b[r][c] && b[r][c][0] === enemy && isValidMove(r, c, kR, kC, b)) return true;
+        return false;
+    }
+
+    function executeMove(targetBoard, fR, fC, tR, tC) {
+        if (targetBoard[tR][tC] && targetBoard[tR][tC][1] === 'k') {
+            gameOver = true;
+            document.getElementById("status").textContent = "¡JAQUE MATE!";
+        }
+        targetBoard[tR][tC] = targetBoard[fR][fC];
+        targetBoard[fR][fC] = "";
+        whiteTurn = !whiteTurn;
+        selectedCell = null;
+        validMoves = [];
+        updateStatus();
+        drawBoard();
+    }
+
+    // MOTOR DE INTELIGENCIA ARTIFICIAL (IA)
+    function bestMoveIA() {
+        let bestScore = -Infinity;
+        let move = null;
+
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                if (board[r][c] && board[r][c][0] === 'b') {
+                    const moves = getSafeMoves(r, c, board);
+                    moves.forEach(m => {
+                        let score = evaluatePosition(r, c, m.r, m.c);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            move = { fR: r, fC: c, tR: m.r, tC: m.c };
+                        }
+                    });
+                }
+            }
+        }
+        if (move) executeMove(board, move.fR, move.fC, move.tR, move.tC);
+        else { gameOver = true; document.getElementById("status").textContent = "Ganan Blancas - Mate"; }
+    }
+
+    function evaluatePosition(fR, fC, tR, tC) {
+        let score = 0;
+        const targetPiece = board[tR][tC];
+        // 1. Ganancia material
+        if (targetPiece) score += pieceValues[targetPiece[1]] * 10;
+        
+        // 2. Posicionamiento (evitar el centro si eres débil, atacar si eres fuerte)
+        if (tR >= 3 && tR <= 4 && tC >= 3 && tC <= 4) score += 2;
+
+        // 3. Simular si el movimiento nos deja en peligro
+        let tempBoard = board.map(row => [...row]);
+        tempBoard[tR][tC] = tempBoard[fR][fC];
+        tempBoard[fR][fC] = "";
+        if (isCheck('b', tempBoard)) score -= 50; // Penalizar movimientos que no quitan el jaque
+
+        return score + Math.random(); // Un poco de azar para no ser predecible
+    }
+
+    function updateStatus() {
+        if (gameOver) return;
+        document.getElementById("status").textContent = whiteTurn ? "Tu turno (Blancas)" : "IA pensando...";
+    }
+
+    document.getElementById("btnPvP").onclick = () => { gameMode = "PvP"; initGame(); };
+    document.getElementById("btnEasy").onclick = () => { gameMode = "easy"; initGame(); };
+    initGame();
+</script>
+</body>
+</html>
